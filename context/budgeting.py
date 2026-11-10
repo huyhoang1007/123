@@ -2,11 +2,11 @@
 context/budgeting.py — Dynamic token budget per model
 ======================================================
 Covers all major model families:
-  - Claude (Anthropic):  sonnet, haiku, opus
-  - Gemini (Google):     2.5-pro, 2.5-flash, 1.5-pro
-  - OpenAI Chat:         gpt-4o, gpt-4.1, gpt-4.5, gpt-4, gpt-3.5
-  - OpenAI Reasoning:    o1, o1-mini, o3, o3-mini, o4-mini
-  - OpenAI Codex:        codex-mini-latest, code-davinci-002, gpt-4o-mini
+  - Claude (Anthropic):  opus, sonnet, haiku
+  - Gemini (Google):     3.8-flash, 3-flash, 3-pro, 2.5-pro, 2.5-flash (+ 1.5 fallbacks)
+  - OpenAI GPT-5 / Chat: gpt-5.5, gpt-5.4, gpt-5-mini, gpt-5, gpt-4.5, gpt-4.1, gpt-4o
+  - OpenAI Reasoning:    o4-mini, o3, o3-mini, o1, o1-mini, o1-preview
+  - OpenAI Codex:        codex-mini-latest, codex-mini (+ legacy fallbacks)
   - Generic fallback:    128k context
 """
 
@@ -34,6 +34,9 @@ _MODEL_TABLE: dict[str, tuple[int, int, int, int]] = {
     "claude-haiku":         (200_000, 10_000,  0,       8_000),
 
     # ── Gemini ──────────────────────────────────────────────────────────────
+    "gemini-3.8-flash":     (1_000_000, 64_000, 0,     16_000),
+    "gemini-3-flash":       (1_000_000, 64_000, 0,     16_000),
+    "gemini-3-pro":         (2_000_000, 64_000, 0,     20_000),
     "gemini-2.5-pro":       (2_000_000, 64_000, 0,     20_000),
     "gemini-2.5-flash":     (1_000_000, 32_000, 0,     16_000),
     "gemini-1.5-pro":       (2_000_000, 8_192,  0,     20_000),
@@ -106,6 +109,7 @@ def _match(model: str) -> tuple[int, int, int, int]:
         "gpt-4.5", "gpt-4.1", "gpt-4o-mini", "gpt-4o",
         "gpt-4-turbo", "gpt-4",
         "gpt-3.5",
+        "gemini-3.8-flash", "gemini-3-flash", "gemini-3-pro",
         "gemini-2.5-pro", "gemini-2.5-flash",
         "gemini-1.5-pro", "gemini-1.5-flash",
         "gemini",

@@ -63,14 +63,20 @@ class Reranker:
         q_set = set(q_tokens)
 
         # Average document length for BM25 normalisation
-        doc_token_lists = [_tokenize(c.content) for c in chunks]
+        doc_token_lists = [_tokenize(f"{getattr(c, 'symbol', '')} {c.content}") for c in chunks]
         avg_dl = sum(len(d) for d in doc_token_lists) / max(len(doc_token_lists), 1)
 
-        for chunk, doc_tokens in zip(chunks, doc_token_lists):
-            bm25 = _bm25_score(q_tokens, doc_tokens, avg_dl)
-            bonus = _keyword_bonus(q_set, doc_tokens)
-            # Blend: BM25 dominates, keyword coverage as tiebreaker
-            chunk._score = bm25 * 0.8 + bonus * 0.2  # type: ignore[attr-defined]
+        raw_lexical = [
+            _bm25_score(q_tokens, doc_tokens, avg_dl) * 0.8 + _keyword_bonus(q_set, doc_tokens) * 0.2
+            for doc_tokens in doc_token_lists
+        ]
+        max_lex = max(raw_lexical, default=0.0)
+
+        for chunk, lex in zip(chunks, raw_lexical):
+            prior_score = float(getattr(chunk, "_score", 0.0))
+            lex_norm = (lex / max_lex) if max_lex > 0.0 else 0.0
+            # Blend with hybrid prior score so semantic/graph/priority signals are preserved
+            chunk._score = prior_score * 0.65 + lex_norm * 0.35  # type: ignore[attr-defined]
 
         chunks.sort(key=lambda x: getattr(x, "_score", 0.0), reverse=True)
         return chunks[:top_k]

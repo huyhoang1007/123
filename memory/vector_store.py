@@ -20,11 +20,13 @@ class VectorStore:
     def __init__(self) -> None:
         self._ids: list[str] = []
         self._paths: list[str] = []
+        self._id_to_idx: dict[str, int] = {}
         self._matrix: np.ndarray | None = None  # shape (N, D)
 
     def clear(self) -> None:
         self._ids.clear()
         self._paths.clear()
+        self._id_to_idx.clear()
         self._matrix = None
 
     def rebuild(self, chunks: list) -> None:
@@ -35,42 +37,52 @@ class VectorStore:
     # ── Helpers ──────────────────────────────────────────────────────────────
 
     def _index_of(self, id_: str) -> int | None:
-        try:
-            return self._ids.index(id_)
-        except ValueError:
-            return None
+        return self._id_to_idx.get(id_)
+
+    @staticmethod
+    def _fit_dim(vec: np.ndarray, dim: int) -> np.ndarray:
+        if vec.shape[0] < dim:
+            return np.pad(vec, (0, dim - vec.shape[0]))
+        if vec.shape[0] > dim:
+            return vec[:dim]
+        return vec
 
     # ── Public API ───────────────────────────────────────────────────────────
 
     def upsert(self, chunks: list) -> None:
-        """Insert or overwrite chunk embeddings."""
+        """Insert or overwrite chunk embeddings in a single O(N) matrix stack."""
+        target_dim = self._matrix.shape[1] if self._matrix is not None else None
+        pending_rows: list[np.ndarray] = []
+
         for c in chunks:
             if not c.embedding:
                 continue
-            vec = np.array(c.embedding, dtype=np.float32)
+            vec = np.asarray(c.embedding, dtype=np.float32)
             norm = np.linalg.norm(vec)
             if norm > 0:
-                vec /= norm  # pre-normalise for cosine via dot
+                vec = vec / norm  # pre-normalise for cosine via dot
 
-            idx = self._index_of(c.id)
+            if target_dim is None:
+                target_dim = vec.shape[0]
+            else:
+                vec = self._fit_dim(vec, target_dim)
+
+            idx = self._id_to_idx.get(c.id)
             if idx is not None:
-                # Update in-place
-                self._matrix[idx] = vec  # type: ignore[index]
+                if self._matrix is not None and idx < self._matrix.shape[0]:
+                    self._matrix[idx] = vec
+                else:
+                    pending_rows[idx - (self._matrix.shape[0] if self._matrix is not None else 0)] = vec
                 self._paths[idx] = c.path
             else:
-                # Append
+                self._id_to_idx[c.id] = len(self._ids)
                 self._ids.append(c.id)
                 self._paths.append(c.path)
-                if self._matrix is None:
-                    self._matrix = vec.reshape(1, -1)
-                else:
-                    # Pad/trim to current dim if needed
-                    d = self._matrix.shape[1]
-                    if vec.shape[0] < d:
-                        vec = np.pad(vec, (0, d - vec.shape[0]))
-                    elif vec.shape[0] > d:
-                        vec = vec[:d]
-                    self._matrix = np.vstack([self._matrix, vec.reshape(1, -1)])
+                pending_rows.append(vec)
+
+        if pending_rows:
+            stacked = np.vstack(pending_rows)
+            self._matrix = stacked if self._matrix is None else np.vstack([self._matrix, stacked])
 
     def search(self, query_vec: list[float], top_k: int = 50) -> list[dict]:
         """Return top-k chunks by cosine similarity."""

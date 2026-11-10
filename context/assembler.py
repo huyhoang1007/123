@@ -16,6 +16,12 @@ Format strategy by model:
 from __future__ import annotations
 
 import json
+import re
+from xml.sax.saxutils import escape as _xml_escape
+
+_CODEX_RE = re.compile(r"(?:^|[-_/])(?:codex|code-davinci|code-cushman)", re.IGNORECASE)
+_REASONING_RE = re.compile(r"(?:^|[-_/])o[134](?:[-_.]|$)", re.IGNORECASE)
+_OPENAI_RE = re.compile(r"(?:^|[-_/])(?:gpt-|o[134](?:[-_.]|$)|codex|code-davinci|code-cushman)", re.IGNORECASE)
 
 
 # ── Memory formatting helper ──────────────────────────────────────────────────
@@ -55,23 +61,16 @@ def _is_claude(model: str) -> bool:
 
 
 def _is_codex(model: str) -> bool:
-    ml = model.lower()
-    return any(kw in ml for kw in (
-        "codex", "code-davinci", "code-cushman",
-    ))
+    return bool(_CODEX_RE.search(model))
 
 
 def _is_reasoning(model: str) -> bool:
     """OpenAI o-series reasoning models."""
-    ml = model.lower()
-    return any(ml.startswith(p) or f"-{p}" in ml for p in (
-        "o1", "o3", "o4",
-    ))
+    return bool(_REASONING_RE.search(model))
 
 
 def _is_openai(model: str) -> bool:
-    ml = model.lower()
-    return any(kw in ml for kw in ("gpt-", "o1", "o3", "o4", "codex", "code-"))
+    return bool(_OPENAI_RE.search(model))
 
 
 # ── Formatters ────────────────────────────────────────────────────────────────
@@ -143,9 +142,12 @@ class ContextAssembler:
             if c.content.startswith("<context>"):  # already compressed
                 chunk_xml += c.content + "\n"
             else:
+                safe_path = _xml_escape(str(c.path), {"'": "&apos;", '"': "&quot;"})
+                safe_sym = _xml_escape(str(c.symbol), {"'": "&apos;", '"': "&quot;"})
+                safe_body = _xml_escape(c.content)
                 chunk_xml += (
-                    f"  <chunk path='{c.path}' symbol='{c.symbol}'>"
-                    f"<content>{c.content}</content></chunk>\n"
+                    f"  <chunk path='{safe_path}' symbol='{safe_sym}'>"
+                    f"<content>{safe_body}</content></chunk>\n"
                 )
 
         parts = [base_prompt]
@@ -166,15 +168,39 @@ class ContextAssembler:
         query: str,
         output_mode: str,
     ) -> str:
-        context_data = {
-            "query": query,
-            "chunks": [
+        mode = (output_mode or "concise").lower()
+        context_data: dict = {}
+        if query:
+            context_data["query"] = query
+
+        if mode == "minimal":
+            context_data["chunks"] = [
+                {
+                    "path": c.path,
+                    "symbol": c.symbol,
+                    "content": "\n".join(c.content.splitlines()[:20]),
+                }
+                for c in chunks
+            ]
+        else:
+            context_data["chunks"] = [
                 {"path": c.path, "symbol": c.symbol, "content": c.content}
                 for c in chunks
-            ],
-            "memory": memory_entries,
-        }
-        ctx_str = json.dumps(context_data, ensure_ascii=False, indent=2)
+            ]
+
+        if memory_entries and mode != "code_only":
+            if mode in ("minimal", "concise"):
+                context_data["memory"] = [
+                    f"[{m['type']}|{m['key']}] {m['value']}" for m in memory_entries
+                ]
+            else:
+                context_data["memory"] = memory_entries
+
+        if mode == "structured":
+            ctx_str = json.dumps(context_data, ensure_ascii=False, indent=2)
+        else:
+            # Compact JSON eliminates whitespace indentation bloat (~15-25% token savings)
+            ctx_str = json.dumps(context_data, ensure_ascii=False, separators=(",", ":"))
         return f"{base_prompt}\n\n[CONTEXT]\n```json\n{ctx_str}\n```"
 
     # ── OpenAI Markdown (Chat + Reasoning) ────────────────────────────────────

@@ -5,8 +5,11 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 import json
+import os
 from pathlib import Path
 import time
+
+from chunking.treesitter_chunker import ASTChunker
 
 
 class RetrievalCache:
@@ -16,19 +19,34 @@ class RetrievalCache:
 
     @staticmethod
     def path_fingerprint(path: str) -> str:
-        """Fingerprint a requested source path so changed files cannot hit cache."""
+        """Fingerprint a requested source path, pruning ignored dirs/extensions."""
         source = Path(path)
         digest = hashlib.sha256()
 
         if not source.exists():
             return "missing"
 
-        files = [source] if source.is_file() else sorted(
-            candidate for candidate in source.rglob("*") if candidate.is_file()
-        )
+        files: list[Path] = []
+        if source.is_file():
+            files.append(source)
+        else:
+            skip_dirs = ASTChunker._SKIP_DIRS
+            skip_exts = ASTChunker._SKIP_EXTS
+            for root, dirs, filenames in os.walk(source):
+                dirs[:] = sorted(
+                    d for d in dirs if d not in skip_dirs and not d.startswith(".git")
+                )
+                for fname in sorted(filenames):
+                    if os.path.splitext(fname)[1].lower() in skip_exts:
+                        continue
+                    files.append(Path(root) / fname)
+
         for file_path in files:
-            stat = file_path.stat()
-            digest.update(str(file_path.resolve()).encode())
+            try:
+                stat = file_path.stat()
+            except OSError:
+                continue
+            digest.update(os.path.normcase(str(file_path.resolve())).encode())
             digest.update(f"{stat.st_mtime_ns}:{stat.st_size}".encode())
         return digest.hexdigest()
 
@@ -37,10 +55,15 @@ class RetrievalCache:
         query: str,
         paths: list[str],
         options: dict | None = None,
+        fingerprints: dict[str, str] | None = None,
     ) -> str:
+        fp_map = fingerprints or {}
         payload = {
             "query": query,
-            "paths": sorted((path, self.path_fingerprint(path)) for path in paths),
+            "paths": sorted(
+                (path, fp_map[path] if path in fp_map else self.path_fingerprint(path))
+                for path in paths
+            ),
             "options": options or {},
         }
         encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False)
@@ -51,8 +74,9 @@ class RetrievalCache:
         query: str,
         paths: list[str],
         options: dict | None = None,
+        fingerprints: dict[str, str] | None = None,
     ) -> list | None:
-        key = self._hash(query, paths, options)
+        key = self._hash(query, paths, options, fingerprints=fingerprints)
         entry = self.cache.get(key)
         if entry is None:
             return None
@@ -69,8 +93,10 @@ class RetrievalCache:
         paths: list[str],
         chunks: list,
         options: dict | None = None,
+        fingerprints: dict[str, str] | None = None,
     ) -> None:
-        self.cache[self._hash(query, paths, options)] = (deepcopy(chunks), time.time())
+        key = self._hash(query, paths, options, fingerprints=fingerprints)
+        self.cache[key] = (deepcopy(chunks), time.time())
 
     def invalidate_all(self) -> None:
         self.cache.clear()

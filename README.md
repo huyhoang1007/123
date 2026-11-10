@@ -1,6 +1,6 @@
 # Harness context engineering v5.0
 
-> **MCP Tool Server** chạy local — tối ưu hóa context window cho AI assistant (Codex / Claude) với Hybrid RAG, Memory Tiers, dynamic token budgeting, và global prompt optimization.
+> **MCP Tool Server** chạy local trên Windows PowerShell / Antigravity — tối ưu hóa context window với Hybrid RAG, Memory Tiers, dynamic token budgeting, và global prompt optimization.
 
 ---
 
@@ -14,10 +14,10 @@
 | **Vector Store** | **In-memory Numpy** (Cosine Similarity) — Nhanh, không phụ thuộc DB external |
 | **BM25** | Full-text sparse retrieval (rank-bm25) |
 | **Reranker** | **Local Hybrid Reranker** (BM25 + Keyword Overlap) |
-| **Chunker** | AST-aware chunker (`treesitter_chunker`) |
-| **Memory DB** | SQLite persistent store — 3 tiers, local relevance ranking, LRU eviction |
+| **Chunker** | AST-aware chunker (`treesitter_chunker`: tree-sitter hoặc stdlib `ast` fallback) |
+| **Memory DB** | SQLite persistent store — 3 tiers, cached TF-IDF/LSA + lexical relevance, LRU eviction |
 | **Logging** | `~/.mcp-harness/harness-v3.log` |
-| **Config** | `.mcp.json` + `~/.gemini/antigravity/mcp_config.json` |
+| **Config** | `~/.gemini/config/mcp_config.json` (Antigravity Global) / `.mcp.json` |
 | **Entry point** | `server.py` |
 
 ---
@@ -25,9 +25,8 @@
 ## 📁 Cấu trúc thư mục
 
 ```
-compact-token/
-├── server.py                  # Entry point — FastMCP server, 13 tools
-├── .mcp.json                  # MCP config cho workspace
+harness-context/
+├── server.py                  # Entry point — FastMCP server, 11 tools
 │
 ├── chunking/
 │   ├── treesitter_chunker.py  # AST-aware code chunker + token counter
@@ -49,15 +48,16 @@ compact-token/
 │   ├── budgeting.py           # Dynamic token budget per model
 │   └── sanitizer.py           # Input/chunk safety sanitizer
 │
-└── compact/
-    └── handoff.py             # No-compression conversation handoff store
+└── tests/
+    ├── test_harness.py        # Unit tests cho các module & store
+    └── test_tools_e2e.py      # E2E tests cho 11 MCP tools & hook_guard.py
 ```
 
 ---
 
-## 🎯 14 MCP Tools
+## 🎯 11 MCP Tools
 
-Các tool này được gọi từ MCP client (Codex / Claude Desktop), không phải CLI shell trực tiếp. Payload bên dưới là JSON arguments truyền vào tool.
+Các tool này được gọi từ MCP client (Antigravity / Gemini / Claude), không phải CLI shell trực tiếp. Payload bên dưới là JSON arguments truyền vào tool.
 
 ### 🔍 Retrieval
 
@@ -71,16 +71,16 @@ Pipeline: `index → hybrid score (BM25 + semantic + graph) → rerank → graph
 | `base_prompt` | — | System prompt gốc |
 | `paths` | — | Danh sách file/folder cần index |
 | `query` | — | Task hiện tại |
-| `model` | `claude-sonnet-4` | Model đích (ảnh hưởng token budget) |
+| `model` | `gemini-3.8-flash` | Model đích (ảnh hưởng token budget & định dạng output) |
 | `output_mode` | `concise` | `concise` / `structured` / `code_only` / `minimal` |
 | `retrieve_top_n` | `50` | Pool candidates trước rerank |
 | `rerank_top_k` | `12` | Chunks sau rerank |
 | `memory_top_k` | `4` | Memory entries inject thêm |
 | `graph_expand` | `true` | Mở rộng qua dependency graph |
-| `compress` | `true` | Nén chunks thành XML |
+| `compress` | `true` | Nén chunks theo model đích |
 | `force_reindex` | `false` | Force re-chunk ngay cả khi đã index |
 | `target_ratio` | `0.20` | Giới hạn prompt cuối theo % context window |
-| `max_prompt_tokens` | `4000` | Giới hạn tuyệt đối theo budget dự án; truyền `0` để dùng `target_ratio` |
+| `max_prompt_tokens` | `0` | Giới hạn tuyệt đối; `0` dùng `target_ratio` & `inject_budget` |
 | `include_report` | `false` | Chỉ thêm report token khi cần audit/debug |
 | `base_prompt_policy` | `reject` | `reject` hoặc `truncate` nếu base prompt quá lớn |
 
@@ -137,33 +137,6 @@ Xóa TTL retrieval cache. Cache cũng tự miss khi fingerprint của file/folde
 
 ---
 
-### 💬 Conversation
-
-#### `handoff_conversation`
-> Tự quyết định handoff khi lịch sử dài mà **không nén hoặc thay đổi message**.
-
-- Mặc định handoff từ `30,000` token, theo session budget của project.
-- Dưới ngưỡng, trả `{ "action": "continue" }` và không ghi dữ liệu.
-- Trên ngưỡng, lưu nguyên `messages_json` vào `~/.mcp-harness/handoffs.sqlite3`
-  rồi trả `handoff_id` nhỏ gọn; MCP client tạo task mới.
-- Gọi `restore_conversation_handoff` với ID đó chỉ khi task mới cần đọc lịch sử.
-
-MCP server không thể tự tạo task trong Codex; client cần gọi tool này trước mỗi
-turn hoặc theo hook của mình, rồi tạo task mới khi `action` là `handoff`.
-
-**Ví dụ:**
-```json
-{
-  "messages_json": "[{\"role\":\"user\",\"content\":\"...\"}]",
-  "threshold_tokens": 30000,
-  "label": "release-planning"
-}
-```
-
-#### `restore_conversation_handoff`
-Lấy lại đúng `messages_json` gốc bằng `handoff_id`. Tool này không tóm tắt,
-cắt bớt, hoặc đổi format OpenAI / Anthropic / Gemini.
-
 ### 🧠 Memory
 
 | Tool | Mô tả |
@@ -171,10 +144,6 @@ cắt bớt, hoặc đổi format OpenAI / Anthropic / Gemini.
 | `memory_save` | Lưu knowledge vào memory tier (`episodic` / `semantic` / `procedural`) |
 | `memory_search` | Tìm kiếm local relevance bằng key, tags và nội dung memory |
 | `memory_inject` | Inject memory entries vào system prompt (không cần RAG) |
-| `memory_delete` | Xóa entry theo key + type |
-| `memory_list` | Liệt kê entries gần nhất |
-| `memory_evict` | LRU eviction — giữ top-N entries |
-| `memory_stats` | Thống kê theo tier (count, tokens, hits) |
 
 **3 Memory Tiers:**
 - `episodic` — sự kiện, lỗi đã gặp, quyết định cụ thể
@@ -232,67 +201,20 @@ Inject memory liên quan vào `base_prompt` mà không cần đọc source code.
 }
 ```
 
-#### `memory_delete`
-Xóa entry theo `key` và `mtype`.
-
-**Use case:** loại bỏ memory sai, cũ, hoặc không còn áp dụng.
-
-**Ví dụ:**
-```json
-{
-  "key": "old-auth-rule",
-  "mtype": "semantic"
-}
-```
-
-#### `memory_list`
-Liệt kê keys gần nhất, có thể lọc theo tier.
-
-**Use case:** audit nhanh memory đang lưu gì trước khi evict hoặc delete.
-
-**Ví dụ:**
-```json
-{
-  "mtype": "semantic",
-  "limit": 20
-}
-```
-
-#### `memory_evict`
-Xóa các memory ít dùng nhất, giữ lại top-N theo LRU.
-
-**Use case:** dọn memory store khi quá nhiều ghi chú cũ làm retrieval nhiễu.
-
-**Ví dụ:**
-```json
-{
-  "keep_top": 300
-}
-```
-
-#### `memory_stats`
-Xem thống kê số lượng, token, lượt hit theo tier.
-
-**Use case:** kiểm tra memory có phình quá lớn hoặc tier nào đang được dùng nhiều.
-
-**Ví dụ:**
-```json
-{}
-```
-
 ---
 
-### 📊 Utilities
+### 📊 Utilities & System Tools
 
 | Tool | Mô tả |
 |---|---|
 | `estimate_tokens` | Ước tính số token cho một đoạn text bất kỳ |
-| `get_token_budget` | Xem token budget cho model cụ thể (context window, headroom, inject budget) |
+| `system_port_status` | Kiểm tra trạng thái cổng TCP và tiến trình đang chiếm giữ |
+| `system_port_kill` | Giải phóng cổng TCP bằng cách kết thúc tiến trình sở hữu |
+| `system_env_status` | Lấy thông tin môi trường (git branch/dirty, active ports, python version, disk space) |
+| `sqlite_db_backup` | Backup an toàn database SQLite bằng native `sqlite3.backup()` |
 
 #### `estimate_tokens`
 Ước tính token và kiểm tra đoạn text có fit trong các model phổ biến không.
-
-**Use case:** trước khi inject prompt dài, kiểm tra kích thước thay vì đoán theo số ký tự.
 
 **Ví dụ:**
 ```json
@@ -301,17 +223,14 @@ Xem thống kê số lượng, token, lượt hit theo tier.
 }
 ```
 
-#### `get_token_budget`
-Trả về context window, reserved output/reasoning/tools và inject budget cho model.
+#### `system_port_status` / `system_port_kill`
+Kiểm tra và giải phóng port TCP an toàn trên Windows.
 
-**Use case:** chọn model phù hợp hoặc debug vì sao `retrieve_context` chỉ chọn một phần chunks.
+#### `system_env_status`
+Kiểm tra nhanh tình trạng môi trường làm việc.
 
-**Ví dụ:**
-```json
-{
-  "model": "gpt-5.5"
-}
-```
+#### `sqlite_db_backup`
+Backup SQLite database với timestamp snapshot.
 
 ---
 
@@ -326,15 +245,12 @@ AI assistant
             │   ├── AST Chunker       → chunk file theo cú pháp
             │   ├── Embedding Engine  → local TF-IDF + LSA vectors (full rebuild khi corpus đổi)
             │   ├── BM25 Index        → sparse keyword scoring
-            │   ├── Hybrid Score      → 55% semantic + 20% BM25 + 15% priority/graph
-            │   ├── Reranker          → cross-encoder rerank
+            │   ├── Hybrid Score      → 60% semantic + 25% BM25 + 10% priority + 5% graph
+            │   ├── Reranker          → local BM25 + keyword overlap reranker
             │   ├── Graph Expander    → dependency symbol expansion
-            │   ├── Compressor        → XML context compression
+            │   ├── Compressor        → provider-aware (Gemini / Codex / OpenAI / Claude)
             │   ├── Memory Store      → inject relevant memories
             │   └── Assembler         → build final enriched prompt
-            │
-            ├── handoff_conversation()
-            │   └── HandoffStore       → preserve raw JSON → return handoff_id
             │
             └── memory_*()
                 └── MemoryStore (SQLite) → Episodic / Semantic / Procedural
@@ -344,27 +260,14 @@ AI assistant
 
 ## ⚙️ Cấu hình
 
-**`.mcp.json`** (workspace-level):
+**`~/.gemini/config/mcp_config.json`** (Antigravity Global — Windows):
 ```json
 {
   "mcpServers": {
     "harness-context-optimizer": {
-      "command": "<repo-path>/.venv/bin/python",
-      "args": ["<repo-path>/server.py"],
-      "env": { "PYTHONUTF8": "1" }
-    }
-  }
-}
-```
-
-**`claude_desktop_config.json`** (`~/Library/Application Support/Claude/`):
-```json
-{
-  "mcpServers": {
-    "harness-context-optimizer": {
-      "command": "<repo-path>/.venv/bin/python",
-      "args": ["<repo-path>/server.py"],
-      "env": { "PYTHONUTF8": "1" }
+      "command": "python",
+      "args": ["<USER_HOME>/.gemini/config/sidecars/harness-context/server.py"],
+      "disabled": false
     }
   }
 }
@@ -372,25 +275,27 @@ AI assistant
 
 ---
 
-## 🛠 Lệnh hữu ích
+## 🛠 Lệnh hữu ích (Windows PowerShell 5.1)
 
-```bash
+```powershell
 # Xem log realtime
-tail -f ~/.mcp-harness/harness-v3.log
+Get-Content "$env:USERPROFILE\.mcp-harness\harness-v3.log" -Wait
 
-# Chạy server thủ công để test
-cd Harness-context-engineering
-.venv/bin/python server.py
+# Kiểm tra sidecar & toàn bộ hệ thống customization
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.gemini\config\scripts\boost_health.ps1"
 
-# Cài dependencies
-.venv/bin/pip install -r requirements.txt
+# Khởi động lại process MCP sidecar nếu server.py vừa sửa
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.gemini\config\scripts\restart_mcp_sidecar.ps1" -ForceKillRunning
+
+# Chạy toàn bộ unit + E2E tests
+python -m unittest discover -s "$env:USERPROFILE\.gemini\config\sidecars\harness-context\tests" -v
 ```
 
 ---
 
 ## 📌 Ghi chú quan trọng
 
-- Log file chính: `~/.mcp-harness/harness-v3.log`
-- Legacy symlink: `~/.gemini/mcp-harness-v3.log` vẫn được tạo tự động nếu hệ thống cho phép
-- Config path `~/.gemini/antigravity/mcp_config.json` phải trỏ đến `server.py` (không phải legacy script)
-- Server tự động load model embeddings khi khởi động lần đầu (có thể mất vài giây)
+- Log file chính: `~/.mcp-harness/harness-v3.log` (tự rotate tại 512 KB, tối đa 2 bản backup)
+- Legacy log (nếu đã tồn tại): `~/.gemini/mcp-harness-v3.log` vẫn được ghi song song
+- Config path `~/.gemini/config/mcp_config.json` (Antigravity Global) phải trỏ đến `server.py`
+- Nếu chưa cài `tiktoken`, bộ đếm token tự động fallback sang ước lượng `chars / 3.5`

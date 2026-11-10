@@ -1,3 +1,4 @@
+import re
 import networkx as nx
 
 
@@ -10,14 +11,22 @@ class DependencyGraph:
         for c in chunks:
             self.graph.add_node(c.id, chunk=c)
 
-        # Basic heuristic to build graph: look for symbol usage
-        # In a real app, you would use tree-sitter references
-        symbols = {c.symbol: c.id for c in chunks if c.symbol != "module"}
-
+        # Map symbol -> list of chunk IDs (avoid overwriting colliding names like __init__)
+        # and filter short symbols (< 3 chars) to prevent substring false edges.
+        symbols: dict[str, list[str]] = {}
         for c in chunks:
-            for sym, t_id in symbols.items():
-                if sym in c.content and t_id != c.id:
-                    self.graph.add_edge(c.id, t_id)  # c depends on sym
+            if c.symbol and c.symbol != "module" and len(c.symbol) >= 3:
+                symbols.setdefault(c.symbol, []).append(c.id)
+
+        if not symbols:
+            return
+
+        sym_re = re.compile(r"\b(" + "|".join(re.escape(s) for s in symbols) + r")\b")
+        for c in chunks:
+            for sym in set(sym_re.findall(c.content)):
+                for t_id in symbols[sym]:
+                    if t_id != c.id:
+                        self.graph.add_edge(c.id, t_id)
 
     def symbol_score(self, query: str, chunk) -> float:
         score = 0.0
@@ -26,20 +35,21 @@ class DependencyGraph:
         return score
 
     def expand(self, chunks: list, max_extra: int = 4) -> list:
-        expanded = set()
+        seen_ids = {c.id for c in chunks}
+        expanded = []
         for c in chunks:
             if c.id in self.graph:
-                neighbors = list(self.graph.successors(c.id)) + \
-                    list(self.graph.predecessors(c.id))
-                for n in neighbors:
-                    expanded.add(n)
-
-        new_chunks = []
-        for n_id in expanded:
-            if len(new_chunks) >= max_extra:
+                for n in list(self.graph.successors(c.id)) + list(self.graph.predecessors(c.id)):
+                    if n not in seen_ids:
+                        seen_ids.add(n)
+                        expanded.append(n)
+                        if len(expanded) >= max_extra:
+                            break
+            if len(expanded) >= max_extra:
                 break
-            chunk_data = self.graph.nodes[n_id].get("chunk")
-            if chunk_data and chunk_data not in chunks:
-                new_chunks.append(chunk_data)
 
-        return new_chunks
+        return [
+            self.graph.nodes[n_id]["chunk"]
+            for n_id in expanded
+            if self.graph.nodes[n_id].get("chunk") is not None
+        ]

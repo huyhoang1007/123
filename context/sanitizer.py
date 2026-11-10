@@ -1,15 +1,18 @@
+import re
+
+_BAD_PHRASE_RE = re.compile(
+    r"ignore previous instructions|system prompt|tool override",
+    re.IGNORECASE,
+)
+
+
 def sanitize(text: str, escape_xml: bool = True) -> str:
     if not text:
         return ""
-    # simple prompt injection protection
-    bad_phrases = [
-        "ignore previous instructions",
-        "system prompt",
-        "tool override"]
-    for bp in bad_phrases:
-        text = text.replace(bp, "[REDACTED]")
+    # Case-insensitive prompt injection protection
+    text = _BAD_PHRASE_RE.sub("[REDACTED]", text)
     if escape_xml:
-        text = text.replace("<", "&lt;").replace(">", "&gt;")
+        text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     return text
 
 

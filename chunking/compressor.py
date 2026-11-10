@@ -6,12 +6,10 @@ model provider:
   - Claude  → XML <context> blocks
   - OpenAI  → Markdown comments (minimal token overhead)
   - Codex   → Single-line summary + truncated code (max 30 lines)
-  - Gemini  → JSON object
+  - Gemini  → Clean trimmed code snippet (assembled into single JSON/Markdown by assembler)
 """
 
 from __future__ import annotations
-
-import json
 
 
 class ContextCompressor:
@@ -38,13 +36,12 @@ class ContextCompressor:
             return [self._compress_codex(c) for c in chunks]
         if "claude" in ml or "anthropic" in ml:
             return [self._compress_claude(c) for c in chunks]
-        # Default: OpenAI markdown (also used for gpt-*, o1/o3/o4)
         return [self._compress_openai(c) for c in chunks]
 
     # ── Claude XML ────────────────────────────────────────────────────────────
     def _compress_claude(self, c) -> str:
         summary = c.summary if c.summary else f"{c.type} {c.symbol}"
-        critical = "\n".join(c.content.splitlines()[:60])
+        critical = "\n".join(c.content.splitlines()[:80])
         return (
             f"<context>\n"
             f"  <summary>{summary}</summary>\n"
@@ -55,7 +52,7 @@ class ContextCompressor:
     # ── OpenAI Markdown ───────────────────────────────────────────────────────
     def _compress_openai(self, c) -> str:
         summary = c.summary if c.summary else f"{c.type} `{c.symbol}`"
-        critical = "\n".join(c.content.splitlines()[:60])
+        critical = "\n".join(c.content.splitlines()[:80])
         lang = _ext_to_lang(c.path)
         return (
             f"<!-- {c.path} | {summary} -->\n"
@@ -65,7 +62,6 @@ class ContextCompressor:
     # ── Codex — ultra-compact ─────────────────────────────────────────────────
     def _compress_codex(self, c) -> str:
         summary = c.summary if c.summary else f"{c.type} {c.symbol}"
-        # Only 30 lines for legacy Codex (tiny context)
         critical = "\n".join(c.content.splitlines()[:30])
         lang = _ext_to_lang(c.path)
         return (
@@ -73,14 +69,13 @@ class ContextCompressor:
             f"```{lang}\n{critical}\n```"
         )
 
-    # ── Gemini JSON ───────────────────────────────────────────────────────────
+    # ── Gemini (no double JSON-encoding; assembler wraps structured output) ───
     def _compress_gemini(self, c) -> str:
-        return json.dumps({
-            "path": c.path,
-            "symbol": c.symbol,
-            "summary": c.summary or f"{c.type} {c.symbol}",
-            "snippet": "\n".join(c.content.splitlines()[:60]),
-        }, ensure_ascii=False)
+        # ponytail: keep raw code up to 100 lines per AST symbol chunk so assembler.py doesn't double-escape JSON
+        lines = c.content.splitlines()
+        if len(lines) <= 100:
+            return c.content
+        return "\n".join(lines[:100]) + f"\n# ... ({len(lines) - 100} lines truncated)"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

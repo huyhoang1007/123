@@ -1,7 +1,7 @@
 """Real end-to-end integration tests for all 11 MCP tools and hook_guard.py.
 
 Standalone suite: does NOT invoke boost_health.ps1 or test_harness.py.
-Uses an isolated temp workspace, temp SQLite memory DB (MCP_HARNESS_MEMORY_DB),
+Uses an isolated temp workspace, temp SQLite memory DB (MCP_HARNESS_MEMORY_DB), temp log dir (MCP_HARNESS_LOG_DIR),
 a real disposable TCP listener process, and real stdio JSON-RPC over MCP.
 """
 
@@ -104,6 +104,7 @@ class RealMCPToolsE2ETests(unittest.TestCase):
         cls.mem_db = cls.tmp / "e2e_memory.sqlite3"
         env = os.environ.copy()
         env["MCP_HARNESS_MEMORY_DB"] = str(cls.mem_db)
+        env["MCP_HARNESS_LOG_DIR"] = str(cls.tmp)
         env["PYTHONUTF8"] = "1"
         cls.client = _MCPStdioClient(env)
         cls.init_res = cls.client.initialize()
@@ -174,7 +175,7 @@ class RealMCPToolsE2ETests(unittest.TestCase):
         injected = self.client.call_tool("memory_inject", {
             "base_prompt": "Follow security policies.",
             "query": "refresh token rotation policy",
-            "model": "gemini-3.8-flash",
+            "model": "gemini-2.5-flash",
             "output_mode": "concise",
             "min_sim": 0.15,
         })
@@ -216,7 +217,7 @@ class RealMCPToolsE2ETests(unittest.TestCase):
             "base_prompt": "Inspect auth flow.",
             "paths": [str(proj)],
             "query": "verify_jwt_signature",
-            "model": "gemini-3.8-flash",
+            "model": "gemini-2.5-flash",
             "output_mode": "concise",
             "include_report": True,
         })
@@ -228,7 +229,7 @@ class RealMCPToolsE2ETests(unittest.TestCase):
             "base_prompt": "Inspect auth flow.",
             "paths": [str(proj)],
             "query": "verify_jwt_signature",
-            "model": "gemini-3.8-flash",
+            "model": "gemini-2.5-flash",
             "output_mode": "structured",
         })
         self.assertGreater(len(res_structured), len(res_concise.split("\n", 1)[1]))
@@ -299,7 +300,7 @@ class RealMCPToolsE2ETests(unittest.TestCase):
         }))
         self.assertGreater(est["tokens"], 20)
         self.assertGreater(est["chars"], 100)
-        self.assertTrue(est["fits_in"]["gemini-3.8-flash"])
+        self.assertTrue(est["fits_in"]["gemini-2.5-flash"])
         self.assertTrue(est["fits_in"]["gpt-4o"])
 
         env = json.loads(self.client.call_tool("system_env_status", {}))
@@ -421,13 +422,16 @@ class RealHookGuardProcessTests(unittest.TestCase):
 
     def test_allows_safe_powershell_and_quoted_payloads(self) -> None:
         for cmd in [
-            r"Remove-Item -Recurse -Force 'C:\Users\DELL 7480\AppData\Local\Temp\build_cache'",
+            r"Remove-Item -Recurse -Force 'C:\Temp\build_cache'",
             r"Remove-Item -Recurse -Force C:\workspace\dist",
             'python -c "print(\'git reset --hard\')"',
             'git status; python -c "rm -rf /"',
             '@"\necho ok && echo done\n"@',
             "python -V",
+            "Write-Output ok\nSelect-String -Pattern foo bar.txt",
             "curl.exe -s https://example.com",
+            "curl.exe --silent https://example.com",
+            "curl.exe -fsSL https://example.com",
             'python -c "curl -s https://example.com; python3 -V"',
             'python -c "print(\'/tmp/x <<EOF\')"',
             "Invoke-RestMethod https://example.com/tmp/status",
@@ -450,10 +454,18 @@ class RealHookGuardProcessTests(unittest.TestCase):
             "git clean -f -x -d",
             "echo a && echo b",
             "Get-Content app.log | grep ERROR",
+            "Write-Output ok\ngrep foo bar.txt",
             "rm -rf ./build",
+            "Write-Output ok\nrm -rf ./build",
             "python3 -V",
             "python -V; python3 script.py",
+            "Write-Output ok\npython3 -V",
             "curl -s https://example.com",
+            "curl -X POST -s https://example.com",
+            "curl --silent https://example.com",
+            "curl -fsSL https://example.com",
+            "curl -sL https://example.com",
+            "Get-Content data.json | jq .name",
             "Invoke-WebRequest https://example.com | Select-Object StatusCode; curl -sS https://example.com",
             "cat > /tmp/lsrpc.sh <<'EOF'\necho ok\nEOF",
             "python - <<EOF\nprint(1)\nEOF",

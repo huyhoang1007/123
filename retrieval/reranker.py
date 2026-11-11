@@ -11,13 +11,9 @@ without any network dependency.
 from __future__ import annotations
 
 import math
-import re
 from collections import Counter
 
-
-def _tokenize(text: str) -> list[str]:
-    """Lower-case word tokeniser (strips punctuation)."""
-    return re.findall(r"[a-z0-9_]+", text.lower())
+from retrieval.bm25 import _tokenize
 
 
 def _bm25_score(

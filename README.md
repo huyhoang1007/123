@@ -15,7 +15,7 @@
 | **BM25** | Full-text sparse retrieval (rank-bm25) |
 | **Reranker** | **Local Hybrid Reranker** (BM25 + Keyword Overlap) |
 | **Chunker** | AST-aware chunker (`treesitter_chunker`: tree-sitter hoặc stdlib `ast` fallback) |
-| **Memory DB** | SQLite persistent store — 3 tiers, cached TF-IDF/LSA + lexical relevance, LRU eviction |
+| **Memory DB** | SQLite persistent store — 3 tiers, cached TF-IDF/LSA + lexical relevance |
 | **Logging** | `~/.mcp-harness/harness-v3.log` |
 | **Config** | `~/.gemini/config/mcp_config.json` (Antigravity Global) / `.mcp.json` |
 | **Entry point** | `server.py` |
@@ -71,7 +71,7 @@ Pipeline: `index → hybrid score (BM25 + semantic + graph) → rerank → graph
 | `base_prompt` | — | System prompt gốc |
 | `paths` | — | Danh sách file/folder cần index |
 | `query` | — | Task hiện tại |
-| `model` | `gemini-3.8-flash` | Model đích (ảnh hưởng token budget & định dạng output) |
+| `model` | `gemini-2.5-flash` | Model đích (ảnh hưởng token budget & định dạng output) |
 | `output_mode` | `concise` | `concise` / `structured` / `code_only` / `minimal` |
 | `retrieve_top_n` | `50` | Pool candidates trước rerank |
 | `rerank_top_k` | `12` | Chunks sau rerank |
@@ -100,7 +100,7 @@ tự nó vượt target, tool sẽ reject với báo cáo rõ, trừ khi bật
   "base_prompt": "You are a senior backend engineer. Use retrieved context only when relevant.",
   "paths": ["src/", "server.py"],
   "query": "optimize auth flow",
-  "model": "gpt-5.5",
+  "model": "gpt-5.4",
   "output_mode": "structured",
   "retrieve_top_n": 50,
   "rerank_top_k": 12,
@@ -197,7 +197,7 @@ Inject memory liên quan vào `base_prompt` mà không cần đọc source code.
   "top_k": 4,
   "min_sim": 0.18,
   "output_mode": "concise",
-  "model": "gpt-5.5"
+  "model": "gpt-5.4"
 }
 ```
 
@@ -260,7 +260,7 @@ AI assistant
 
 ## ⚙️ Cấu hình
 
-**`~/.gemini/config/mcp_config.json`** (Antigravity Global — Windows):
+**`~/.gemini/config/mcp_config.json`** (Antigravity Global — Windows). Trạng thái hiện tại: **chưa đăng ký** (`mcpServers` rỗng; skill `supermemory` đang nằm ở `skills_disabled/`). Muốn bật: cấu hình `~/.gemini/config/mcp_config.json` (và kiểm tra trạng thái tại **Additional Options (...) > MCP Servers**), rồi chuyển lại skill `supermemory` vào `skills/`.
 ```json
 {
   "mcpServers": {
@@ -296,6 +296,5 @@ python -m unittest discover -s "$env:USERPROFILE\.gemini\config\sidecars\harness
 ## 📌 Ghi chú quan trọng
 
 - Log file chính: `~/.mcp-harness/harness-v3.log` (tự rotate tại 512 KB, tối đa 2 bản backup)
-- Legacy log (nếu đã tồn tại): `~/.gemini/mcp-harness-v3.log` vẫn được ghi song song
 - Config path `~/.gemini/config/mcp_config.json` (Antigravity Global) phải trỏ đến `server.py`
 - Nếu chưa cài `tiktoken`, bộ đếm token tự động fallback sang ước lượng `chars / 3.5`

@@ -51,24 +51,15 @@ import time
 
 # ── Logging ─────────────────────────────────────────────────────────────
 # Primary log: provider-neutral location under ~/.mcp-harness/
-LOG_DIR = os.path.expanduser("~/.mcp-harness")
+LOG_DIR = os.path.expanduser(os.environ.get("MCP_HARNESS_LOG_DIR") or "~/.mcp-harness")
 LOG_FILE = os.path.join(LOG_DIR, "harness-v3.log")
 os.makedirs(LOG_DIR, exist_ok=True)
-_LEGACY_LINK = os.path.join(os.path.expanduser("~/.gemini"), "mcp-harness-v3.log")
 
 _log_handlers: list[logging.Handler] = [
     logging.handlers.RotatingFileHandler(
         LOG_FILE, maxBytes=524288, backupCount=2, encoding="utf-8"
     ),
 ]
-
-# If a stale legacy file already exists and is not the primary log file,
-# write to it as well so older Get-Content -Wait commands keep working.
-try:
-    if os.path.exists(_LEGACY_LINK) and not os.path.samefile(LOG_FILE, _LEGACY_LINK):
-        _log_handlers.append(logging.FileHandler(_LEGACY_LINK, encoding="utf-8"))
-except OSError:
-    pass
 
 logging.basicConfig(
     level=logging.INFO,
@@ -482,7 +473,7 @@ def retrieve_context(
     base_prompt: str,
     paths: list[str],
     query: str,
-    model: str = "gemini-3.8-flash",
+    model: str = "gemini-2.5-flash",
     output_mode: str = "concise",
     retrieve_top_n: int = 50,
     rerank_top_k: int = 12,
@@ -496,8 +487,7 @@ def retrieve_context(
     include_report: bool = DEFAULT_INCLUDE_REPORT,
     base_prompt_policy: str = "reject",
 ) -> str:
-    """Hybrid AST + vector + BM25 + graph RAG retrieval with memory injection and token-budget trimming.
-    output_mode: 'concise' | 'structured' | 'code_only' | 'minimal'. base_prompt_policy: 'reject' | 'truncate'."""
+    """Hybrid AST+vector+BM25+graph RAG with memory & budget cap (output_mode: concise|structured|code_only|minimal; base_prompt_policy: reject|truncate)."""
     try:
         budget = get_budget(model)
         target_tokens = _prompt_token_limit(
@@ -657,14 +647,7 @@ def memory_save(
     mtype: str = "semantic",
     tags: str = "",
 ) -> str:
-    """
-    Save knowledge to long-term memory.
-
-    :param key:   Short identifying key (used for search).
-    :param value: Content to remember.
-    :param mtype: Memory tier — "episodic" | "semantic" | "procedural"
-    :param tags:  Comma-separated labels for filtering.
-    """
+    """Save knowledge to long-term memory (mtype: 'episodic' | 'semantic' | 'procedural')."""
     try:
         value = sanitize(value, escape_xml=False)
         store = {
@@ -686,14 +669,7 @@ def memory_search(
     top_k: int = 5,
     min_sim: float = 0.12,
 ) -> str:
-    """
-    Search long-term memory by semantic similarity.
-
-    :param query:   Search query.
-    :param mtype:   Filter by tier: "episodic" | "semantic" | "procedural" | "" (all)
-    :param top_k:   Max results.
-    :param min_sim: Minimum similarity threshold (0–1).
-    """
+    """Search long-term memory by hybrid similarity (mtype: 'episodic' | 'semantic' | 'procedural' | '')."""
     try:
         from memory.episodic import MemoryType
         mt = None
@@ -716,14 +692,13 @@ def memory_inject(
     top_k: int = 4,
     min_sim: float = 0.18,
     output_mode: str = "concise",
-    model: str = "gemini-3.8-flash",
+    model: str = "gemini-2.5-flash",
     target_ratio: float = 0.20,
     max_prompt_tokens: int = DEFAULT_MAX_PROMPT_TOKENS,
     include_report: bool = DEFAULT_INCLUDE_REPORT,
     base_prompt_policy: str = "reject",
 ) -> str:
-    """Inject relevant memory entries into base_prompt within token budget (without file retrieval).
-    output_mode: 'concise' | 'structured' | 'code_only' | 'minimal'. base_prompt_policy: 'reject' | 'truncate'."""
+    """Inject matching memory entries into base_prompt within token cap (output_mode: concise|structured|code_only|minimal; base_prompt_policy: reject|truncate)."""
     try:
         entries = mem_store.search(query, top_k=top_k, min_sim=min_sim)
         budget = get_budget(model)
@@ -763,16 +738,13 @@ def memory_inject(
 
 @mcp.tool()
 def estimate_tokens(text: str) -> str:
-    """
-    Estimate token count for any text.
-    Useful for checking prompt size before sending to model.
-    """
+    """Estimate token count and model budget fit for any text."""
     tok = count_tokens(text)
     chars = len(text)
     # Representative models across active providers
     _benchmark_models = [
         # Gemini
-        "gemini-3.8-flash",
+        "gemini-2.5-flash",
         "gemini-3-flash",
         "gemini-3-pro",
         "gemini-2.5-pro",
@@ -780,7 +752,6 @@ def estimate_tokens(text: str) -> str:
         "claude-sonnet-4",
         "claude-opus-4",
         # OpenAI GPT-5 & Chat
-        "gpt-5.5",
         "gpt-5.4",
         "gpt-5",
         "gpt-4o",
@@ -810,10 +781,7 @@ def estimate_tokens(text: str) -> str:
 
 @mcp.tool()
 def system_port_status(port: int) -> str:
-    """
-    Check network port status and owning process on Windows without opening PowerShell.
-    :param port: TCP local port number (e.g. 8080, 3000).
-    """
+    """Check TCP port listener status and owning process on Windows."""
     try:
         import subprocess
 
@@ -870,10 +838,7 @@ def system_port_status(port: int) -> str:
 
 @mcp.tool()
 def system_port_kill(port: int) -> str:
-    """
-    Terminate the process listening on a specified TCP port on Windows.
-    :param port: TCP local port number to free (e.g. 8080, 3000).
-    """
+    """Terminate the non-system process listening on a specified TCP port."""
     try:
         import subprocess
         if not 1 <= port <= 65535:
@@ -921,9 +886,7 @@ def system_port_kill(port: int) -> str:
 
 @mcp.tool()
 def system_env_status() -> dict:
-    """
-    Get current environment status: git branch/dirty, active ports, python version, encoding, free disk.
-    """
+    """Get git branch/dirty state, active TCP ports, Python version, encoding, and free disk."""
     import subprocess
     import shutil
 
@@ -1006,10 +969,7 @@ def system_env_status() -> dict:
 
 @mcp.tool()
 def sqlite_db_backup(db_path: str) -> dict:
-    """
-    Create a backup of a SQLite database using native sqlite3.backup().
-    :param db_path: Path to the SQLite database file.
-    """
+    """Create a read-only online SQLite backup (<file>.db.bak.<timestamp>) via sqlite3.backup()."""
     import sqlite3
     try:
         resolved_path = os.path.abspath(db_path)
@@ -1062,10 +1022,7 @@ def invalidate_cache() -> str:
 
 @mcp.tool()
 def reindex_paths(paths: list[str]) -> str:
-    """
-    Force re-chunking and re-indexing of given paths.
-    Use after significant file edits to refresh the vector index.
-    """
+    """Force re-chunking and re-indexing of given file or directory paths."""
     logger.info(f"[Server] force reindex: {paths}")
     try:
         chunks = _ensure_indexed(paths, force_reindex=True)

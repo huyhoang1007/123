@@ -9,8 +9,7 @@ Format strategy by model:
   - OpenAI Chat (GPT):   Markdown — fenced code blocks, clean headings
   - OpenAI Codex:        Compact Markdown — minimise overhead tokens;
                           only emit file path + critical code snippet
-  - OpenAI Reasoning:    Markdown — same as chat but no `<system>` injection
-                          (summary injected as user message by compactor)
+  - OpenAI Reasoning:    Markdown — same as chat without `<system>` injection
 """
 
 from __future__ import annotations
@@ -18,6 +17,8 @@ from __future__ import annotations
 import json
 import re
 from xml.sax.saxutils import escape as _xml_escape
+
+from chunking.compressor import _ext_to_lang as _infer_language
 
 _CODEX_RE = re.compile(r"(?:^|[-_/])(?:codex|code-davinci|code-cushman)", re.IGNORECASE)
 _REASONING_RE = re.compile(r"(?:^|[-_/])o[134](?:[-_.]|$)", re.IGNORECASE)
@@ -280,46 +281,3 @@ class ContextAssembler:
         parts.append(f"# Task\n{query}")
         return "\n\n".join(parts)
 
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-_EXT_LANG: dict[str, str] = {
-    ".py": "python",
-    ".ts": "typescript",
-    ".tsx": "tsx",
-    ".js": "javascript",
-    ".jsx": "jsx",
-    ".go": "go",
-    ".rs": "rust",
-    ".java": "java",
-    ".kt": "kotlin",
-    ".cs": "csharp",
-    ".cpp": "cpp",
-    ".c": "c",
-    ".h": "c",
-    ".hpp": "cpp",
-    ".rb": "ruby",
-    ".php": "php",
-    ".swift": "swift",
-    ".sh": "bash",
-    ".zsh": "bash",
-    ".md": "markdown",
-    ".json": "json",
-    ".yaml": "yaml",
-    ".yml": "yaml",
-    ".toml": "toml",
-    ".html": "html",
-    ".css": "css",
-    ".sql": "sql",
-}
-
-
-def _infer_language(path: str) -> str:
-    """Guess a markdown fence language tag from file extension."""
-    if not path:
-        return ""
-    dot = path.rfind(".")
-    if dot == -1:
-        return ""
-    ext = path[dot:].lower()
-    return _EXT_LANG.get(ext, "")

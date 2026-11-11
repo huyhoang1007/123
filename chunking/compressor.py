@@ -83,8 +83,8 @@ class ContextCompressor:
 _EXT_LANG: dict[str, str] = {
     ".py": "python", ".ts": "typescript", ".tsx": "tsx",
     ".js": "javascript", ".jsx": "jsx", ".go": "go",
-    ".rs": "rust", ".java": "java", ".cs": "csharp",
-    ".cpp": "cpp", ".c": "c", ".h": "c",
+    ".rs": "rust", ".java": "java", ".kt": "kotlin", ".cs": "csharp",
+    ".cpp": "cpp", ".c": "c", ".h": "c", ".hpp": "cpp",
     ".rb": "ruby", ".php": "php", ".swift": "swift",
     ".sh": "bash", ".zsh": "bash", ".md": "markdown",
     ".json": "json", ".yaml": "yaml", ".yml": "yaml",

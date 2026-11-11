@@ -61,15 +61,3 @@ class EmbeddingEngine:
         """Embed a query with the existing corpus model without refitting it."""
         return self._transform([text])[0].tolist()
 
-    def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """Compatibility wrapper for callers indexing a complete corpus."""
-        if not texts:
-            return []
-        return self.rebuild(texts)
-
-    def similarity(self, a: str, b: str) -> float:
-        if self._pipe is None:
-            self.rebuild([a, b])
-        vecs = self._transform([a, b])
-        dot = float(np.dot(vecs[0], vecs[1]))
-        return max(-1.0, min(1.0, dot))

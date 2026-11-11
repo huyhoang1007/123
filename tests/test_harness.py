@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import os
 import sqlite3
 import tempfile
 from pathlib import Path
@@ -9,6 +11,10 @@ import sys
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
+
+_UNIT_TMP = tempfile.TemporaryDirectory()
+os.environ.setdefault("MCP_HARNESS_LOG_DIR", _UNIT_TMP.name)
+os.environ.setdefault("MCP_HARNESS_MEMORY_DB", str(Path(_UNIT_TMP.name) / "unit_mem.sqlite3"))
 
 import numpy as np
 
@@ -82,7 +88,7 @@ class ASTChunkerAndGraphTests(unittest.TestCase):
             symbol="my_func", content="def my_func():\n    return 42",
             summary="function_definition my_func", tokens=10,
         )
-        compressed = comp.compress([chunk], model="gemini-3.8-flash")[0]
+        compressed = comp.compress([chunk], model="gemini-2.5-flash")[0]
         self.assertEqual(compressed, "def my_func():\n    return 42")
         self.assertFalse(compressed.startswith("{"))
 
@@ -154,9 +160,9 @@ class RerankerAndSanitizerTests(unittest.TestCase):
             summary="", tokens=8,
         )
         mem = [{"type": "semantic", "key": "k", "value": "v", "time": 1.0}]
-        concise = asm.assemble("Base", [chunk], mem, "q", "concise", "gemini-3.8-flash")
-        structured = asm.assemble("Base", [chunk], mem, "q", "structured", "gemini-3.8-flash")
-        code_only = asm.assemble("Base", [chunk], mem, "q", "code_only", "gemini-3.8-flash")
+        concise = asm.assemble("Base", [chunk], mem, "q", "concise", "gemini-2.5-flash")
+        structured = asm.assemble("Base", [chunk], mem, "q", "structured", "gemini-2.5-flash")
+        code_only = asm.assemble("Base", [chunk], mem, "q", "code_only", "gemini-2.5-flash")
         self.assertLess(len(concise), len(structured))
         self.assertNotIn("memory", code_only)
         claude = asm.assemble("Base", [chunk], mem, "q", "concise", "claude-sonnet-4")
@@ -340,8 +346,8 @@ class IndexRefreshTests(unittest.TestCase):
     def test_default_prompt_cap_uses_dynamic_target_ratio_and_eleven_active_tools(self):
         self.assertEqual(server.DEFAULT_MAX_PROMPT_TOKENS, 0)
         self.assertFalse(server.DEFAULT_INCLUDE_REPORT)
-        budget = server.get_budget("gemini-3.8-flash")
-        self.assertEqual(budget.inject_budget, 920_000)
+        budget = server.get_budget("gemini-2.5-flash")
+        self.assertEqual(budget.inject_budget, 952_000)
         limit = server._prompt_token_limit(
             context_window=budget.context_window,
             inject_budget=budget.inject_budget,
@@ -387,6 +393,19 @@ class IndexRefreshTests(unittest.TestCase):
 
         env = server.system_env_status()
         self.assertNotEqual(env["git_branch"], "unknown")
+
+
+def tearDownModule() -> None:
+    try:
+        if getattr(server, "mem_store", None) is not None:
+            server.mem_store.close()
+        MemoryStore._instance = None
+        root_logger = logging.getLogger()
+        for handler in list(getattr(server, "_log_handlers", [])):
+            root_logger.removeHandler(handler)
+            handler.close()
+    finally:
+        _UNIT_TMP.cleanup()
 
 
 if __name__ == "__main__":

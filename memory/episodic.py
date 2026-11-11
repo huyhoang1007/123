@@ -244,39 +244,6 @@ class MemoryStore:
         ).fetchone()
         return self._entry(row)
 
-    def delete(self, mtype: MemoryType, key: str) -> bool:
-        cursor = self._conn.execute(
-            "DELETE FROM memories WHERE type = ? AND key = ?", (mtype.value, key)
-        )
-        self._conn.commit()
-        if cursor.rowcount > 0:
-            self._index_dirty = True
-        return cursor.rowcount > 0
-
-    def list_keys(self, mtype: MemoryType | None = None, limit: int = 30) -> list[str]:
-        sql = "SELECT key FROM memories"
-        params: tuple = ()
-        if mtype is not None:
-            sql += " WHERE type = ?"
-            params = (mtype.value,)
-        sql += " ORDER BY last_access DESC LIMIT ?"
-        return [row["key"] for row in self._conn.execute(sql, (*params, limit))]
-
-    def evict_lru(self, keep_top: int) -> int:
-        keep_top = max(keep_top, 0)
-        before = self._conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
-        self._conn.execute("""
-            DELETE FROM memories
-            WHERE id NOT IN (
-                SELECT id FROM memories ORDER BY last_access DESC, id DESC LIMIT ?
-            )
-        """, (keep_top,))
-        self._conn.commit()
-        removed = before - self._conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
-        if removed > 0:
-            self._index_dirty = True
-        return removed
-
     def stats(self) -> dict:
         summary = {"total": 0}
         rows = self._conn.execute("""

@@ -266,7 +266,7 @@ AI assistant
   "mcpServers": {
     "harness-context-optimizer": {
       "command": "python",
-      "args": ["<USER_HOME>/.gemini/config/sidecars/harness-context/server.py"],
+      "args": ["<USER_HOME>/.gemini/config/mcp_servers/harness-context/server.py"],
       "disabled": false
     }
   }
@@ -288,7 +288,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.gemini\co
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.gemini\config\scripts\restart_mcp_sidecar.ps1" -ForceKillRunning
 
 # Chạy toàn bộ unit + E2E tests
-python -m unittest discover -s "$env:USERPROFILE\.gemini\config\sidecars\harness-context\tests" -v
+python -B -m unittest discover -s "$env:USERPROFILE\.gemini\config\mcp_servers\harness-context\tests" -v
+
+# Trợ lý bảo trì / cập nhật / CLI trong harness-context
+python -B "$env:USERPROFILE\.gemini\config\mcp_servers\harness-context\scripts\harness_ctl.py" doctor
+python -B "$env:USERPROFILE\.gemini\config\mcp_servers\harness-context\scripts\harness_ctl.py" update --clean-pycache
+python -B "$env:USERPROFILE\.gemini\config\mcp_servers\harness-context\scripts\harness_ctl.py" probe
+
+# Quản trị 3 tầng memory SQLite & benchmark tiết kiệm token RAG
+python -B "$env:USERPROFILE\.gemini\config\mcp_servers\harness-context\scripts\memory_cli.py" stats
+python -B "$env:USERPROFILE\.gemini\config\mcp_servers\harness-context\scripts\bench_retrieve.py" --paths "$env:USERPROFILE\.gemini\config\mcp_servers\harness-context\retrieval" --query "hybrid score reranker"
 ```
 
 ---

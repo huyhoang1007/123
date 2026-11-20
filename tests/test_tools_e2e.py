@@ -271,7 +271,7 @@ class RealMCPToolsE2ETests(unittest.TestCase):
         self.assertNotIn("ephemeral_obsolete_fn_xyz", res_updated)
 
         # Strict token cap: reject vs truncate base_prompt_policy
-        long_base = ("Strict security policy guideline line. " * 25).strip()
+        long_base = ("Strict security policy guideline line. " * 50).strip()
         rejected = self.client.call_tool("retrieve_context", {
             "base_prompt": long_base,
             "paths": [str(proj)],
@@ -436,6 +436,9 @@ class RealHookGuardProcessTests(unittest.TestCase):
             'python -c "print(\'/tmp/x <<EOF\')"',
             "Invoke-RestMethod https://example.com/tmp/status",
             r"Test-Path 'C:\tmp\cache'",
+            "git push origin main",
+            "git push --force-with-lease origin main",
+            "git push -u origin feature-foo",
         ]:
             out = self._run_hook(cmd)
             self.assertEqual(out["decision"], "allow", f"Expected allow for {cmd!r}, got {out}")
@@ -452,12 +455,19 @@ class RealHookGuardProcessTests(unittest.TestCase):
             r'cmd /c "rd /s /q C:\Users"',
             "git reset --hard HEAD~1",
             "git clean -f -x -d",
+            "git push --force origin main",
+            "git push origin main -f",
+            "git push -uf origin main",
             "echo a && echo b",
             "Get-Content app.log | grep ERROR",
             "Write-Output ok\ngrep foo bar.txt",
             "rm -rf ./build",
+            "rm -f -r ./build",
+            r"rm -f -r C:\Windows",
             "Write-Output ok\nrm -rf ./build",
             "python3 -V",
+            "& python3 -V",
+            "python3.exe -V",
             "python -V; python3 script.py",
             "Write-Output ok\npython3 -V",
             "curl -s https://example.com",
@@ -468,6 +478,7 @@ class RealHookGuardProcessTests(unittest.TestCase):
             "Get-Content data.json | jq .name",
             "Invoke-WebRequest https://example.com | Select-Object StatusCode; curl -sS https://example.com",
             "cat > /tmp/lsrpc.sh <<'EOF'\necho ok\nEOF",
+            "cat <<\\EOF\nhi\nEOF",
             "python - <<EOF\nprint(1)\nEOF",
             "source /tmp/lsrpc.sh; cat /tmp/out.txt",
         ]:

@@ -59,6 +59,16 @@ class MemoryCliAndBenchTests(unittest.TestCase):
             self.assertEqual(imp["imported"], 2)
             self.assertEqual(memory_cli.stats_readonly(db2)["total"], 2)
 
+            dry = memory_cli.prune_by_tag(db2, tag="windows", dry_run=True)
+            self.assertEqual(dry["matched"], 1)
+            self.assertEqual(dry["deleted"], 0)
+            self.assertEqual(memory_cli.stats_readonly(db2)["total"], 2)
+
+            pruned = memory_cli.prune_by_tag(db2, tag="windows")
+            self.assertEqual(pruned["deleted"], 1)
+            self.assertTrue(pruned["backup"]["success"])
+            self.assertEqual(memory_cli.stats_readonly(db2)["total"], 1)
+
     def test_bench_retrieve_measures_corpus_and_modes(self):
         with tempfile.TemporaryDirectory() as tmp:
             proj = pathlib.Path(tmp)

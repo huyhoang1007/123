@@ -885,15 +885,21 @@ def system_port_kill(port: int) -> str:
 
 
 @mcp.tool()
-def system_env_status() -> dict:
+def system_env_status(workspace_path: str = "") -> dict:
     """Get git branch/dirty state, active TCP ports, Python version, encoding, and free disk."""
     import subprocess
     import shutil
 
-    workspace = next(
-        (p for p in (_ROOT, *_ROOT.parents) if (p / ".git").exists()),
-        _ROOT,
-    )
+    def _find_git_root(start: Path) -> Path | None:
+        resolved = start.resolve()
+        return next((p for p in (resolved, *resolved.parents) if (p / ".git").exists()), None)
+
+    if workspace_path.strip():
+        target = Path(workspace_path).expanduser().resolve()
+        base = target.parent if target.is_file() else target
+        workspace = _find_git_root(base) or (base if base.exists() else _ROOT)
+    else:
+        workspace = _find_git_root(Path.cwd()) or _find_git_root(_ROOT) or Path.cwd()
 
     git_branch = "unknown"
     git_dirty = False

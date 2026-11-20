@@ -167,6 +167,45 @@ def search_entries(
         store._conn.close()
 
 
+def prune_by_tag(
+    db_path: pathlib.Path,
+    *,
+    tag: str,
+    dry_run: bool = False,
+    no_backup: bool = False,
+) -> dict:
+    """Delete memory rows containing exact comma-separated `tag` after an online SQLite backup."""
+    target = tag.strip().lower()
+    if not target:
+        raise ValueError("Tag must be non-empty.")
+    if not db_path.is_file():
+        return {"exists": False, "tag": tag, "matched": 0, "deleted": 0, "backup": None}
+
+    conn = _open_readonly(db_path)
+    try:
+        rows = conn.execute("SELECT id, type, key, tags FROM memories").fetchall()
+    finally:
+        conn.close()
+
+    matched_ids = [
+        int(r["id"])
+        for r in rows
+        if target in {t.strip().lower() for t in str(r["tags"] or "").split(",") if t.strip()}
+    ]
+    if dry_run or not matched_ids:
+        return {"exists": True, "dry_run": dry_run, "tag": tag, "matched": len(matched_ids), "deleted": 0, "backup": None}
+
+    backup_info = None if no_backup else backup_sqlite_db(db_path)
+    rw = sqlite3.connect(str(db_path), timeout=5.0)
+    try:
+        rw.execute("PRAGMA busy_timeout = 5000")
+        with rw:
+            rw.executemany("DELETE FROM memories WHERE id = ?", [(mid,) for mid in matched_ids])
+    finally:
+        rw.close()
+    return {"exists": True, "dry_run": False, "tag": tag, "matched": len(matched_ids), "deleted": len(matched_ids), "backup": backup_info}
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="CLI manager for harness-context SQLite memory tiers.")
     parser.add_argument("--db", default=None, help="Path to memory.sqlite3 (defaults to ~/.mcp-harness/memory.sqlite3).")
@@ -200,6 +239,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_inj.add_argument("--base-prompt", default="Follow project conventions.")
     p_inj.add_argument("--top-k", type=int, default=4)
     p_inj.add_argument("--min-sim", type=float, default=0.18)
+
+    p_prune = sub.add_parser("prune", help="Delete memory entries matching an exact tag (backs up DB first).")
+    p_prune.add_argument("--tag", required=True)
+    p_prune.add_argument("--dry-run", action="store_true")
+    p_prune.add_argument("--no-backup", action="store_true")
 
     return parser
 
@@ -254,6 +298,10 @@ def main(argv: list[str] | None = None) -> int:
         mem_block = "\n".join(f"- [{h['type']}] {h['key']}: {h['value']}" for h in hits)
         out = args.base_prompt if not mem_block else f"{args.base_prompt}\n\n[Memories]\n{mem_block}"
         print(out)
+        return 0
+    if args.cmd == "prune":
+        res = prune_by_tag(db_path, tag=args.tag, dry_run=args.dry_run, no_backup=args.no_backup)
+        print(json.dumps(res, indent=2, ensure_ascii=False))
         return 0
     return 1
 

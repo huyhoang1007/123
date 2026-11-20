@@ -394,6 +394,11 @@ class IndexRefreshTests(unittest.TestCase):
         env = server.system_env_status()
         self.assertNotEqual(env["git_branch"], "unknown")
 
+        with tempfile.TemporaryDirectory() as non_git_dir:
+            isolated = server.system_env_status(workspace_path=non_git_dir)
+            self.assertEqual(isolated["git_branch"], "unknown")
+            self.assertFalse(isolated["git_dirty"])
+
 
 def tearDownModule() -> None:
     try:
